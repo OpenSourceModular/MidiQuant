@@ -1,3 +1,11 @@
+/*
+ * 
+ * MidiQuantizer for Eurorack
+ * Justin Ahrens
+ * justin@ahrens.net 
+ * 
+ */
+
 #include <Adafruit_MCP4725.h> // Required for MCP4725 library
 #include <SPI.h>              // Required for I2C comms
 #include <Wire.h>             // Required for I2C comms
@@ -15,36 +23,46 @@
 Adafruit_MCP4725 dac; // creates an instance of the DAC
 Adafruit_MCP4725 dac2; // creates an instance of the DAC
 
+bool blinkBottom = false;
+bool midiChanged = false;
+
+byte data;
+
 int noteBuffer = 1;
 int tempNoteBuffer = 0;
-byte data;
 int a1Raw = 0;
 int lastA1Raw = 0;
 int analogNote = 0;
-unsigned long lastMidiNoteOn = 0;
-unsigned long waitPeriod = 2000;
-unsigned long blinkLength = 150;
-unsigned long minPauseDAC = 80;
-bool blinkBottom = false;
-bool midiChanged = false;
-unsigned long tempPause = 250;
-unsigned long lastAnalog = 0;
 int lastAnalogNote = 0;
 int topSwitchStatus = 0;
 int bottomSwitchStatus = 0;
 int loopCounter = 0;
 
-const PROGMEM uint16_t dac_notes[61] = 
+unsigned long lastMidiNoteOn = 0;
+unsigned long waitPeriod = 2000;
+unsigned long blinkLength = 150;
+unsigned long minPauseDAC = 80;
+unsigned long tempPause = 250;
+unsigned long lastAnalog = 0;
+
+float topVolt = 5.0;
+float dacInterval = (((5.0 / topVolt) * 4095.0) / 60.0);
+
+uint32_t dac_notes[61]; // holds the calculated values for the DAC
+
+/*const PROGMEM uint16_t dac_notes[61] = 
 {// C    C#     D    D#     E     F    F#     G    G#     A    A#     B 
     0,   68,  137,  205,  273,  341,  410,  478,  546,  614,  683,  751,
   819,  887,  956, 1024, 1092, 1161, 1229, 1297, 1365, 1434, 1502, 1570,
  1638, 1707, 1775, 1843, 1911, 1980, 2048, 2116, 2185, 2253, 2321, 2389, 
  2458, 2526, 2594, 2662, 2731, 2799, 2867, 2935, 3004, 3072, 3140, 3209,
  3277, 3345, 3413, 3482, 3550, 3618, 3686, 3755, 3823, 3891, 3959, 4028,
- 4095};
+ 4095};*/
+ 
 SendOnlySoftwareSerial serialOut2(4); 
 unsigned long lastMidi = 0;
 void setup() {
+  for (int x = 0; x < 62; x++) {dac_notes[x] = round(x * dacInterval);}
   Serial.begin(31250);      //Midi In/Out 1
   serialOut2.begin(9600);
   serialOut2.println("DEBUG OUT");
