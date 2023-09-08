@@ -12,6 +12,7 @@
 #include <SendOnlySoftwareSerial.h>
 #define TOP_SWITCH 10
 #define BOTTOM_SWITCH 11
+#define topLED 13
 #define bottomLED 12
 #define middleLED 9
 #define MIDI_NOTE_ON    0x90 
@@ -45,9 +46,26 @@ unsigned long blinkLength = 150;
 unsigned long minPauseDAC = 80;
 unsigned long tempPause = 250;
 unsigned long lastAnalog = 0;
+//
 
-float topVolt = 5.0; // Adjust this to your voltage at the DAC. Do not go lower than 5.0
-float dacInterval = (((5.0 / topVolt) * 4095.0) / 60.0);
+// There are three options for powering the DAC module(s)
+// Option one: power them with the same 5v source as the ATMega chip(or NANO)
+//     This voltage may vary quite a bit as your rack uses more or less power
+//
+// Option two: use a 5V LM4040 voltage reference with a 10k resistor to get 5.0 V. This will be very close to 5.0v and remain consistent
+//
+// Option three: use a 4.069V LM4040 voltage reference with a to 4.097 V. This will be very close to 4.096V and remain consistent
+//
+// The advantage of the 4.096 option is that it matches the 4096 step resolution of the 12 bit DAC. This means each step is .001v 
+// This also means that the pitches are a bit more accurate compared to 5.0V
+//
+// Depending on which option you choose, measure the votage at the DAC and update the "actualVoltageAtDAC" variable
+// The formula will calculate the values for each pitch based on the actual voltage.
+
+float numNotes = 48.0; // 48.0 for 4.069v DAC -- 60.0 for 5.00v DAC
+float topVolt = 4.0; // Adjust this to your voltage at the DAC. Do not go lower than 4.0 or 5.0
+float actualVoltageAtDAC = 4.084;
+float dacInterval = (((topVolt / actualVoltageAtDAC) * 4095.0) / numNotes);
 
 uint32_t dac_notes[61]; // holds the calculated values for the DAC
 
@@ -63,7 +81,7 @@ uint32_t dac_notes[61]; // holds the calculated values for the DAC
 SendOnlySoftwareSerial serialOut2(4); 
 unsigned long lastMidi = 0;
 void setup() {
-  for (int x = 0; x < 62; x++) {dac_notes[x] = round(x * dacInterval);}
+  for (int x = 0; x < numNotes+2; x++) {dac_notes[x] = round(x * dacInterval);}
   Serial.begin(31250);      //Midi In/Out 1
   if (DEBUG_OUT) serialOut2.begin(9600);
   if (DEBUG_OUT) serialOut2.println("DEBUG OUT");
@@ -77,7 +95,7 @@ void setup() {
   delayMicroseconds(25);
   TWBR = ((F_CPU /400000l) - 16) / 2; // Change the i2c clock to 400KHz
   dac.setVoltage( 0 , false);
-  for (int o = 0; 0 < 4; o++) // blink top led
+  for (int o = 0; o < 4; o++) // blink top led
   {
     digitalWrite(topLED, HIGH);
     delay(100);
@@ -88,11 +106,12 @@ void setup() {
 }
 
 void loop() {
-  //readSwitches();
+  readSwitches();
   loopCounter++;
   readAnalogInput();
   checkMidiIn();
   if ((millis() - lastMidiNoteOn) > waitPeriod) digitalWrite(topLED, LOW);
+    
 }
 int returnClosestNote(int aNote) //simple function to go down the scale until we get a note in the chord
 {
@@ -125,7 +144,7 @@ void readAnalogInput() {
   a1Raw = analogRead(A1);                                     // get the current analog in
   if ((abs(a1Raw - lastA1Raw))>5)                             // check if it is more than 5 steps away from last reading (debounce)     
   {
-    analogNote = map(a1Raw, 0, 1024, 0, 61);                  // map the new reading from 0-60 (C to C 5 octaves)
+    analogNote = map(a1Raw, 0, 1024, 0, numNotes + 1);                  // map the new reading from 0-60 (C to C 5 octaves)(or 0-48)
     analogNote = returnClosestNote(analogNote);               // get the closest quantized note (going down)
     if (analogNote == 100) analogNote = lastAnalogNote;       // if there is no quantized note, the function returns a 100 so reset the analog note
     lastA1Raw = a1Raw;                                        // save the last ananlog reading
@@ -137,7 +156,7 @@ void readAnalogInput() {
     lastAnalogNote = analogNote;                                       // save lastAnalogNote
     dac.setVoltage( pgm_read_word(&(dac_notes[analogNote])), false);   // set the DAC voltage to the new note
     int shiftedNote = 0;                                               // shifted note for second DAC  
-    if (analogNote > 55) shiftedNote = analogNote;                     // as long as the note isn't too high 
+    if (analogNote > numNotes - 5) shiftedNote = analogNote;                     // as long as the note isn't too high 
     else shiftedNote = analogNote + 5;                                 // add the shift
     dac2.setVoltage( pgm_read_word(&(dac_notes[shiftedNote])), false); // set the voltage for DAC 2
     lastAnalog = millis();                                             // save time of last analog change
