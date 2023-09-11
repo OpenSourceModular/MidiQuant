@@ -12,14 +12,16 @@
 #include <SendOnlySoftwareSerial.h>
 #define TOP_SWITCH 10
 #define BOTTOM_SWITCH 11
-#define topLED 13
-#define bottomLED 12
-#define middleLED 9
+#define TOP_LED_PIN 13
+#define BOTTOM_LED_PIN 12
+#define MIDDLE_LED_PIN 9
+#define KNOB_PIN A0
+#define CV_PIN A2
 #define MIDI_NOTE_ON    0x90 
 #define MIDI_NOTE_OFF   0x80
 #define MIDI_POLYPHONIC 0xA0
 #define MIDI_CC B0
-#define DEBUG_OUT 0 //change to 1 to send debug messages via debug pin
+#define DEBUG_OUT 1 //change to 1 to send debug messages via debug pin
                     //debug messages can be sent to 2nd Arduino which relays them to USB Serial      
 
 Adafruit_MCP4725 dac; // creates an instance of the DAC
@@ -27,6 +29,7 @@ Adafruit_MCP4725 dac2; // creates an instance of the DAC
 
 bool blinkBottom = false;
 bool midiChanged = false;
+bool shiftChanged = false;
 
 byte data;
 
@@ -34,11 +37,18 @@ int noteBuffer = 1;
 int tempNoteBuffer = 0;
 int a1Raw = 0;
 int lastA1Raw = 0;
+int a2Raw = 0;
+int lastA2Raw = 0;
 int analogNote = 0;
 int lastAnalogNote = 0;
+int analogNote2 = 0;
+int lastAnalogNote2 = 0;
 int topSwitchStatus = 0;
 int bottomSwitchStatus = 0;
 int loopCounter = 0;
+int shiftAmount = 0;
+int lastShiftAmount = 0; 
+int shiftCV = 0;
 
 unsigned long lastMidiNoteOn = 0;
 unsigned long waitPeriod = 2000;
@@ -62,9 +72,9 @@ unsigned long lastAnalog = 0;
 // Depending on which option you choose, measure the votage at the DAC and update the "actualVoltageAtDAC" variable
 // The formula will calculate the values for each pitch based on the actual voltage.
 
-float numNotes = 48.0; // 48.0 for 4.069v DAC -- 60.0 for 5.00v DAC
+float numNotes = 48.0; // 48.0 for 4.096v DAC -- 60.0 for 5.00v DAC
 float topVolt = 4.0; // Adjust this to your voltage at the DAC. Do not go lower than 4.0 or 5.0
-float actualVoltageAtDAC = 4.084;
+float actualVoltageAtDAC = 4.096;
 float dacInterval = (((topVolt / actualVoltageAtDAC) * 4095.0) / numNotes);
 
 uint32_t dac_notes[61]; // holds the calculated values for the DAC
@@ -85,9 +95,9 @@ void setup() {
   Serial.begin(31250);      //Midi In/Out 1
   if (DEBUG_OUT) serialOut2.begin(9600);
   if (DEBUG_OUT) serialOut2.println("DEBUG OUT");
-  pinMode(topLED, OUTPUT);
-  pinMode(bottomLED, OUTPUT);
-  pinMode(middleLED, OUTPUT);
+  pinMode(TOP_LED_PIN, OUTPUT);
+  pinMode(BOTTOM_LED_PIN, OUTPUT);
+  pinMode(MIDDLE_LED_PIN, OUTPUT);
   pinMode(TOP_SWITCH, INPUT_PULLUP);
   pinMode(BOTTOM_SWITCH, INPUT_PULLUP);
   dac.begin(0x60);
@@ -97,20 +107,21 @@ void setup() {
   dac.setVoltage( 0 , false);
   for (int o = 0; o < 4; o++) // blink top led
   {
-    digitalWrite(topLED, HIGH);
+    digitalWrite(TOP_LED_PIN, HIGH);
     delay(100);
-    digitalWrite(topLED, LOW);
+    digitalWrite(TOP_LED_PIN, LOW);
     delay(100);
   }
   
 }
 
 void loop() {
+  //serialOut2.println(analogRead(KNOB_PIN));
   readSwitches();
   loopCounter++;
   readAnalogInput();
   checkMidiIn();
-  if ((millis() - lastMidiNoteOn) > waitPeriod) digitalWrite(topLED, LOW);
+  if ((millis() - lastMidiNoteOn) > waitPeriod) digitalWrite(TOP_LED_PIN, LOW);
     
 }
 int returnClosestNote(int aNote) //simple function to go down the scale until we get a note in the chord
@@ -132,47 +143,83 @@ int returnClosestNote(int aNote) //simple function to go down the scale until we
             keepGoing = false;
           }
         } else 
-        {
-          theQuantizedNote = 100;
+        { 
+          bool test = true;
+          int h = 0;
+          while (test) {
+            if (bitRead(noteBuffer, h))
+            {
+              theQuantizedNote = 2 ^ h;
+              test = false;
+            }
+            h++;
+          }
+          //theQuantizedNote = 100;
           keepGoing = false;
         }
       }
   }
   return theQuantizedNote;
 }
+
 void readAnalogInput() {
-  a1Raw = analogRead(A1);                                     // get the current analog in
-  if ((abs(a1Raw - lastA1Raw))>5)                             // check if it is more than 5 steps away from last reading (debounce)     
+  //serialOut2.println(analogRead(A2));
+  shiftCV = map(analogRead(CV_PIN), 0, 1024,0,13);
+  shiftAmount = map(analogRead(KNOB_PIN), 0, 1024, 0, 13);
+  if (bottomSwitchStatus) shiftAmount = shiftAmount + shiftCV;
+  if (shiftAmount > 12) shiftAmount = 12;
+  if (shiftAmount != lastShiftAmount)
   {
+      lastShiftAmount = shiftAmount;
+      shiftChanged = true;
+  }
+  a1Raw = analogRead(A1);                                     // get the current analog in
+  a2Raw = analogRead(A2);
+
+  if (((abs(a1Raw - lastA1Raw))>5) || midiChanged || shiftChanged)                             // check if it is more than 5 steps away from last reading (debounce)     
+  {
+    
     analogNote = map(a1Raw, 0, 1024, 0, numNotes + 1);                  // map the new reading from 0-60 (C to C 5 octaves)(or 0-48)
     analogNote = returnClosestNote(analogNote);               // get the closest quantized note (going down)
     if (analogNote == 100) analogNote = lastAnalogNote;       // if there is no quantized note, the function returns a 100 so reset the analog note
     lastA1Raw = a1Raw;                                        // save the last ananlog reading
+  }  
+
+  if (((abs(a2Raw - lastA2Raw))>5) || midiChanged || shiftChanged)                             // check if it is more than 5 steps away from last reading (debounce)     
+  {
+    
+    analogNote2 = map(a2Raw, 0, 1024, 0, numNotes + 1);                  // map the new reading from 0-60 (C to C 5 octaves)(or 0-48)
+    analogNote2 = returnClosestNote(analogNote2);               // get the closest quantized note (going down)
+    if (analogNote2 == 100) analogNote2 = lastAnalogNote2;       // if there is no quantized note, the function returns a 100 so reset the analog note
+    lastA2Raw = a2Raw;                                        // save the last ananlog reading
   }
   
-  if ((analogNote != lastAnalogNote)||midiChanged)            // if we have a new note or if we have a new midi chord
+  if (analogNote != lastAnalogNote || analogNote2 != lastAnalogNote2 || midiChanged || shiftChanged)            // if we have a new note or if we have a new midi chord
   {
-    midiChanged = false;                                               // reset midiChanged
+    if (midiChanged) midiChanged = false;                                               // reset midiChanged
+    if (shiftChanged) shiftChanged = false;                                               // reset midiChanged
     lastAnalogNote = analogNote;                                       // save lastAnalogNote
-    dac.setVoltage( pgm_read_word(&(dac_notes[analogNote])), false);   // set the DAC voltage to the new note
+    dac.setVoltage( dac_notes[analogNote], false);   // set the DAC voltage to the new note
     int shiftedNote = 0;                                               // shifted note for second DAC  
-    if (analogNote > numNotes - 5) shiftedNote = analogNote;                     // as long as the note isn't too high 
-    else shiftedNote = analogNote + 5;                                 // add the shift
-    dac2.setVoltage( pgm_read_word(&(dac_notes[shiftedNote])), false); // set the voltage for DAC 2
+    if (analogNote > numNotes - shiftAmount) shiftedNote = analogNote;                     // as long as the note isn't too high 
+    else shiftedNote = analogNote + shiftAmount;                                 // add the shift
+    if (bottomSwitchStatus) dac2.setVoltage( dac_notes[shiftedNote], false); // set the voltage for DAC 2
+    else dac2.setVoltage( dac_notes[analogNote2], false); // set the voltage for DAC 2
     lastAnalog = millis();                                             // save time of last analog change
   } 
 }
 
 void checkMidiIn(){
   if(Serial.available() > 0) {                              //if there is serial data waiting
-    byte data = Serial.read();                              //read one byte
-    if (DEBUG_OUT) serialOut2.println(data,HEX);            
-    if (data = MIDI_NOTE_ON) {                              //if it is a MIDI Note On message
+    byte data = Serial.read();
+    delay(1); //read one byte
+    //if (DEBUG_OUT) serialOut2.println(data,HEX);            
+    if (data == MIDI_NOTE_ON) {                              //if it is a MIDI Note On message
       if ((millis()- lastMidiNoteOn) > waitPeriod)          //our waiting period has elapsed
       {                                                     // so
         noteBuffer = 0;                                     // reset note buffer
         midiChanged = true;                                 // this lets the main loop know we have new midi input
-        if (DEBUG_OUT) serialOut2.println("MIDI Changed");
+        //if (DEBUG_OUT) serialOut2.println("MIDI Changed");
       }
       data = Serial.read();                                 // read the next byte which is the note value
       if (DEBUG_OUT) serialOut2.println(data,HEX);
@@ -182,7 +229,7 @@ void checkMidiIn(){
       if (DEBUG_OUT) serialOut2.println(data,HEX);
       lastMidiNoteOn = millis();                            // save the time in ms for when we last got a midi note
       if (DEBUG_OUT) printNotes();
-      digitalWrite(topLED, HIGH);                           // turn on top LED to show midi activity
+      digitalWrite(TOP_LED_PIN, HIGH);                           // turn on top LED to show midi activity
     }
   }
 }
