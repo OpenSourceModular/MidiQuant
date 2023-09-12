@@ -149,7 +149,7 @@ int returnClosestNote(int aNote) //simple function to go down the scale until we
           while (test) {
             if (bitRead(noteBuffer, h))
             {
-              theQuantizedNote = h;
+              theQuantizedNote = 2 ^ h;
               test = false;
             }
             h++;
@@ -194,19 +194,11 @@ void readAnalogInput() {
     lastA2Raw = a2Raw;                                        // save the last ananlog reading
   }
   
-  if ((analogNote != lastAnalogNote) || (analogNote2 != lastAnalogNote2) || midiChanged || shiftChanged)            // if we have a new note or if we have a new midi chord
+  if (analogNote != lastAnalogNote || analogNote2 != lastAnalogNote2 || midiChanged || shiftChanged)            // if we have a new note or if we have a new midi chord
   {
-    //serialOut2.print(analogNote);
-    //serialOut2.print(" ");
-    //serialOut2.print(analogNote2);
-    //serialOut2.print(" ");
-    //serialOut2.print(midiChanged);
-    //serialOut2.print(" ");
-    //serialOut2.println(shiftChanged);
     if (midiChanged) midiChanged = false;                                               // reset midiChanged
     if (shiftChanged) shiftChanged = false;                                               // reset midiChanged
     lastAnalogNote = analogNote;                                       // save lastAnalogNote
-    lastAnalogNote2 = analogNote2;
     dac.setVoltage( dac_notes[analogNote], false);   // set the DAC voltage to the new note
     int shiftedNote = 0;                                               // shifted note for second DAC  
     if (analogNote > numNotes - shiftAmount) shiftedNote = analogNote;                     // as long as the note isn't too high 
